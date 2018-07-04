@@ -1,5 +1,3 @@
-
-
 data Type = TypeArrow Multiplicity Type Type | TBoolean deriving (Eq,Show)
 
 data Multiplicity = One | Omega deriving (Show,Eq)
@@ -27,7 +25,7 @@ type Alt = (Tag, [Name], Term)
 
 data Term = Var Name | Lambda Bind Term | App Term Term | Case Term [Alt] | Contructor Tag [Term]
 
-type ErroWrapper a = Either String a
+type Tc a = Either String a
 
 bindIn :: Bind -> Context -> Bool
 bindIn _ [] = False
@@ -41,14 +39,7 @@ scaleCtx x ctx = [(name, (m*x)
 addCtx :: Context -> Context -> Context
 addCtx ctx1 ctx2 = [case x `look` ctx2 of Just (x',q',t') -> (x, q+q', t) ; Nothing -> (x,q,t) | (x,q,t)<-ctx1]
 
-addCtx' :: Context -> Context -> Context
-addCtx' ctx1 [] = ctx1
-addCtx' [] ctx2 = ctx2
-addCtx' ((x,m,t) : ctx1) ctx2 | (x,m,t) `bindIn` ctx2 = (x, Omega, t) : addCtx' ctx1 (deleteBind x ctx2)
-                             | otherwise = (x,m,t) : addCtx' ctx1 ctx2
-
-
-throw :: String -> ErroWrapper a
+throw :: String -> Tc a
 throw message = Left message
 
 look :: Name -> Context -> Maybe Bind
@@ -83,12 +74,11 @@ compatibleMult Omega _ = True
 compatibleMult _ _     = False
 
 
-check :: Term -> ErroWrapper (Context, Type)
-check t = check_ [] t
+checkTop :: Term -> Tc (Context, Type)
+checkTop t = check [] t
 
-check_ :: Context -> Term -> ErroWrapper (Context, Type)
-
-check_ ctxIn (Var x) = case (look x ctxIn) of
+check :: Context -> Term -> Tc (Context, Type)
+check ctxIn (Var x) = case (look x ctxIn) of
                         Just (_,_,ty) -> return ([(x,1,ty)],ty)
                         Nothing       -> throw "Non defined var"
 
@@ -96,26 +86,26 @@ check_ ctxIn (Var x) = case (look x ctxIn) of
 -- _________________________________________________ (ABS)
 --
 --     Gama |-c Lambda (x:qA) . t:A ->q B ; Gama'-x                                  
-check_ gama (Lambda (x,q,a) t ) =  do{
-  (ctx,b) <- check_ ((x,q,a):gama) t;
+check ctxIn (Lambda (x,q,a) t ) =  do{
+  (ctxOut,b) <- check ((x,q,a):ctxIn) t;
   let result = (TypeArrow q a b) in
-  case look x ctx of 
-    Just (x',q',t') -> if (x',q',t') `compatible` ctx then return (( x `deleteBind` ctx),result) else throw "type error"
-    Nothing -> if(q == Omega) then return (ctx,result) else throw (x ++ " was discarded")
+  case look x ctxOut of 
+    Just (x',q',t') -> if (x',q',t') `compatible` ctxOut then return (( x `deleteBind` ctxOut),result) else throw "type error"
+    Nothing -> if(q == Omega) then return (ctxOut,result) else throw (x ++ " was discarded")
 }                              
 
 --        Gama |-c A ->q B ; Gama'   Gama |- u:A ; Delta
 --  _______________________________________________________(APP)
 --
 --           Gama |-c t.u :B ; Gama' + q*Delta                         
-check_ gama (App t u) = do{ 
-                            (gama',(TypeArrow q a b)) <- check_ gama t;
-                            (_,type2)                 <- check_ gama u;
-                            let delta = gama' `addCtx` (q `scaleCtx` delta) in
-                              if(a == type2) then return (delta, b) else throw "type error"                              
+check ctxIn (App t u) = do{ 
+                            (_,(TypeArrow q a b)) <- check ctxIn t;
+                            (gamma,type2)         <- check ctxIn u;
+                            let result = ctxIn `addCtx` (q `scaleCtx` gamma) in
+                              if(a == type2) then return (result, b) else throw "type error"                              
                           }
 
-check_ _ _ = throw "pattern matching exausted"
+check _ _ = throw "pattern matching exausted"
 
 
 
